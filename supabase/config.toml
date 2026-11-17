@@ -1,0 +1,12 @@
+project_id = "kolo-bankingapp"
+
+[functions.api]
+verify_jwt = true
+
+# The bank can't sign in to Supabase; this function checks the bank's own signature instead.
+[functions.bank-webhook]
+verify_jwt = false
+
+# Called by pg_cron with the CRON_SECRET header.
+[functions.reconcile]
+verify_jwt = false
