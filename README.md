@@ -46,7 +46,7 @@ Vercel's free plan runs scheduled jobs once a day, so the checker in `vercel.jso
 
 ## The app (mobile/)
 
-**Web version (no install):** https://kolo-web.vercel.app is built automatically from `mobile/` on every push (Vercel project `kolo-web`).
+**Web version (no install):** https://kolo-web-eight.vercel.app is built automatically from `mobile/` on every push (Vercel project `kolo-web`).
 
 **Real phone app, from a laptop (Windows or Mac):**
 1. Install **Node.js LTS** from nodejs.org and **Git** from git-scm.com.
