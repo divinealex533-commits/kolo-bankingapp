@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, StyleSheet, Text, View } from "react-native";
+import { AppState, Platform, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as LocalAuthentication from "expo-local-authentication";
 import { usePreventScreenCapture } from "expo-screen-capture";
@@ -7,13 +7,16 @@ import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { PinPad } from "./PinPad";
 
+// Screenshot blocking only exists on phones; the web version skips it.
+const usePreventCapture = Platform.OS === "web" ? () => {} : usePreventScreenCapture;
+
 const BACKGROUND_LOCK_MS = 30_000;   // lock if the app was away for 30 seconds
 const IDLE_LOCK_MS = 2 * 60_000;     // lock after 2 minutes without a touch
 
 // Wraps the whole app: blocks screenshots (Android), hides content in the app switcher,
 // and asks for Face ID / PIN when you come back or stop using the app.
 export function AppLock({ children }: { children: React.ReactNode }) {
-  usePreventScreenCapture();
+  usePreventCapture();
   const { me, signOut } = useSession();
   const enabled = !!me?.pin_set;
   const [locked, setLocked] = useState(true);

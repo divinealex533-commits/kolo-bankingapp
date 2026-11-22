@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Share, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { shareText } from "@/lib/dialog";
 import * as Clipboard from "expo-clipboard";
 import { Button, Card, Divider, Note, Screen } from "@/components/ui";
 import { fmtAcct } from "@/lib/money";
@@ -27,7 +28,7 @@ export default function Receive() {
         <Row k="Bank" v={a.bank_name} />
       </Card>
       <Button title={copied ? "Copied ✓" : "Copy account number"} onPress={async () => { await Clipboard.setStringAsync(a.account_number); setCopied(true); setTimeout(() => setCopied(false), 1500); }} />
-      <Button title="Share details" kind="secondary" onPress={() => Share.share({ message: `${a.account_name}\n${a.account_number}\n${a.bank_name}` })} />
+      <Button title="Share details" kind="secondary" onPress={() => shareText(`${a.account_name}\n${a.account_number}\n${a.bank_name}`)} />
       {me?.profile.tag ? <Note>Kolo users can also pay you instantly at @{me.profile.tag}.</Note> : null}
       {me?.tier.max_balance_kobo ? <Note>Your account level ({me.tier.name}) has a maximum balance. Upgrade in Me → Account level to receive larger amounts.</Note> : null}
     </Screen>

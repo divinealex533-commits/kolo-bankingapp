@@ -9,7 +9,9 @@
     "ios": {
       "bundleIdentifier": "ng.kolo.app",
       "supportsTablet": false,
-      "infoPlist": { "NSFaceIDUsageDescription": "Kolo uses Face ID to unlock the app quickly and securely." }
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Kolo uses Face ID to unlock the app quickly and securely."
+      }
     },
     "android": {
       "package": "ng.kolo.app",
@@ -18,8 +20,23 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      ["expo-local-authentication", { "faceIDPermission": "Kolo uses Face ID to unlock the app quickly and securely." }]
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Kolo uses Face ID to unlock the app quickly and securely."
+        }
+      ]
     ],
-    "experiments": { "typedRoutes": false }
+    "experiments": {
+      "typedRoutes": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "name": "Kolo",
+      "shortName": "Kolo",
+      "themeColor": "#0d4f4a",
+      "backgroundColor": "#0d4f4a"
+    }
   }
 }

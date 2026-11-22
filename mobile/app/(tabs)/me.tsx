@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Alert, Switch, Text, View } from "react-native";
+import { Switch, Text, View } from "react-native";
+import { Alert } from "@/lib/dialog";
 import { router } from "expo-router";
 import { Button, Card, Divider, Field, H2, Note, Row, Screen } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Share, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
+import { shareText } from "@/lib/dialog";
 import { Button, Card, Divider } from "@/components/ui";
 import { Txn, txnTitle } from "@/components/TxnRow";
 import { naira } from "@/lib/money";
@@ -57,7 +58,7 @@ export function TxnDetail({ t }: { t: Txn | null }) {
           </View>
         ))}
       </Card>
-      <Button title="Share receipt" kind="secondary" onPress={() => Share.share({ message: `Kolo receipt\n${rows.map(([k, v]) => `${k}: ${v}`).join("\n")}` })} />
+      <Button title="Share receipt" kind="secondary" onPress={() => shareText(`Kolo receipt\n${rows.map(([k, v]) => `${k}: ${v}`).join("\n")}`)} />
     </View>
   );
 }

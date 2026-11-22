@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { Alert, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { Alert } from "@/lib/dialog";
 import { useFocusEffect } from "expo-router";
 import { Button, Card, Chip, Divider, Field, H2, Note, Row, Screen } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";

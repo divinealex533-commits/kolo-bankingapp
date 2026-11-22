@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert } from "react-native";
+import { Alert } from "@/lib/dialog";
 import { router } from "expo-router";
 import { Screen } from "@/components/ui";
 import { PinPad } from "@/components/PinPad";

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, Switch, Text, View } from "react-native";
+import { Switch, Text, View } from "react-native";
+import { Alert } from "@/lib/dialog";
 import { router } from "expo-router";
 import { Button, Card, Chip, Divider, H2, Note, Row, Screen } from "@/components/ui";
 import { useAuthorize } from "@/components/Authorize";
