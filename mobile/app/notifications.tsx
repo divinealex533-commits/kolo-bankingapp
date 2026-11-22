@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { Card, Divider, Note, Screen } from "@/components/ui";
 import { when } from "@/lib/money";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { useColors } from "@/lib/theme";
 
 type N = { id: number; title: string; body: string; kind: string; read: boolean; created_at: string };
@@ -12,11 +12,8 @@ export default function Notifications() {
   const c = useColors();
   const [items, setItems] = useState<N[] | null>(null);
   useEffect(() => {
-    supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(100).then(async ({ data }) => {
-      setItems((data as N[]) ?? []);
-      const unread = (data ?? []).filter((n) => !n.read).map((n) => n.id);
-      if (unread.length) await supabase.from("notifications").update({ read: true }).in("id", unread);
-    });
+    // Opening the list marks everything as read on the server.
+    api<{ notifications: N[] }>("notifications.list").then((r) => setItems(r.notifications)).catch(() => setItems([]));
   }, []);
   return (
     <Screen title="Notifications">

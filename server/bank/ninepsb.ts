@@ -4,7 +4,7 @@
 // exact URLs, auth scheme and field names are NOT guessed here. Each method below says what
 // it must do and what it must return; map 9PSB's request and response onto that.
 //
-// Secrets (set with `supabase secrets set ...`, never in code or in the app):
+// Secrets (Vercel → Project → Settings → Environment Variables, never in code or in the app):
 //   NINEPSB_BASE_URL, NINEPSB_CLIENT_ID, NINEPSB_CLIENT_SECRET (or API key), NINEPSB_WEBHOOK_SECRET
 //
 // Checklist when the docs arrive:
@@ -16,8 +16,8 @@
 //   [ ] transfer status requery by our reference
 //   [ ] inbound credit webhook + how it is signed; outbound transfer status webhook
 //   [ ] their sandbox test accounts and test BVNs
-import type { BankProvider, Bank, TransferResult, VirtualAccount, WebhookEvent } from "./types.ts";
-import { AppError } from "../http.ts";
+import type { BankProvider, Bank, TransferResult, VirtualAccount, WebhookEvent } from "./types";
+import { AppError } from "../http";
 
 const notReady = (what: string): never => {
   throw new AppError("provider_not_configured", `9PSB ${what} isn't connected yet. Set BANK_PROVIDER=mock until the 9PSB integration is finished.`, 503);
@@ -25,7 +25,7 @@ const notReady = (what: string): never => {
 
 export class NinePSB implements BankProvider {
   readonly id = "9psb";
-  private base = Deno.env.get("NINEPSB_BASE_URL") ?? "";
+  private base = process.env.NINEPSB_BASE_URL ?? "";
   private token: { value: string; exp: number } | null = null;
 
   // Shared request helper. Adjust headers/auth to match the docs.

@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Chip, Note } from "@/components/ui";
 import { Txn, TxnRow } from "@/components/TxnRow";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { useColors } from "@/lib/theme";
 
 const PAGE = 30;
@@ -18,10 +18,8 @@ export default function History() {
 
   const load = useCallback(async (reset: boolean, f = filter) => {
     const from = reset ? 0 : rows.length;
-    let q = supabase.from("transactions").select("*").order("created_at", { ascending: false }).range(from, from + PAGE - 1);
-    if (f !== "all") q = q.eq("direction", f);
-    const { data } = await q;
-    const got = (data as Txn[]) ?? [];
+    const { transactions: got } = await api<{ transactions: Txn[] }>("transactions.list", { limit: PAGE, offset: from, direction: f === "all" ? undefined : f })
+      .catch(() => ({ transactions: [] as Txn[] }));
     setRows((r) => (reset ? got : [...r, ...got])); setDone(got.length < PAGE);
   }, [filter, rows.length]);
 

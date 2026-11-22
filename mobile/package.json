@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "*",
-    "@supabase/supabase-js": "^2.50.0",
     "expo": "~58.0.0",
     "expo-clipboard": "*",
     "expo-constants": "*",
@@ -32,7 +31,6 @@
     "react-native-safe-area-context": "*",
     "react-native-screens": "*",
     "react-native-svg": "*",
-    "react-native-url-polyfill": "*",
     "react-native-web": "*"
   },
   "devDependencies": {

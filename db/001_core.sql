@@ -1,39 +1,75 @@
--- Kolo core banking schema (Phase 1)
+-- Kolo core banking schema for Neon (plain Postgres).
 -- All money is stored in kobo (bigint). ₦1 = 100 kobo. Never use floats for money.
--- Balances change ONLY through the security-definer functions at the bottom of this file,
--- which are callable by the service role (edge functions) and never by the app directly.
+-- Balances change ONLY through the money functions in this file, which only the server calls.
+-- The app never talks to the database directly; it goes through the Kolo API on Vercel.
 
 create extension if not exists pgcrypto;
 
+create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now());
+
 -- ───────────────────────── types ─────────────────────────
-create type public.kyc_status as enum ('none', 'pending', 'verified', 'rejected');
-create type public.txn_status as enum ('pending', 'successful', 'failed', 'reversed');
-create type public.txn_direction as enum ('debit', 'credit');
+create type kyc_status as enum ('none', 'pending', 'verified', 'rejected');
+create type txn_status as enum ('pending', 'successful', 'failed', 'reversed');
+create type txn_direction as enum ('debit', 'credit');
 
 -- ───────────────────────── account tiers ─────────────────────────
 -- CBN tiered-KYC limits. CONFIRM the current figures with 9PSB before launch; they change.
-create table public.tiers (
+create table tiers (
   tier smallint primary key,
   name text not null,
   single_kobo bigint not null,        -- max per transaction
   daily_kobo bigint not null,         -- max total debits per day
   max_balance_kobo bigint             -- null = no cap
 );
-insert into public.tiers values
+insert into tiers values
   (0, 'Unverified', 0, 0, 0),
   (1, 'Tier 1', 5000000, 5000000, 30000000),            -- ₦50k / ₦50k / ₦300k
   (2, 'Tier 2', 20000000, 20000000, 50000000),          -- ₦200k / ₦200k / ₦500k
   (3, 'Tier 3', 500000000, 500000000, null);            -- ₦5m / ₦5m / no cap
 
+-- ───────────────────────── sign-in ─────────────────────────
+create table users (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null unique check (phone ~ '^234[789][01][0-9]{8}$'),
+  created_at timestamptz not null default now()
+);
+
+-- SMS sign-in codes (hashed, single use, short-lived)
+create table login_codes (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  code_hash text not null,
+  attempts int not null default 0,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index login_codes_phone on login_codes (phone, created_at desc);
+
+-- One row per signed-in device. The app holds a random token; only its hash is stored here.
+create table sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users (id) on delete cascade,
+  token_hash text not null unique,
+  device_id text not null,
+  device_name text not null default 'Unknown device',
+  ip text,
+  created_at timestamptz not null default now(),
+  last_seen timestamptz not null default now(),
+  expires_at timestamptz not null,
+  revoked_at timestamptz
+);
+create index sessions_user on sessions (user_id) where revoked_at is null;
+
 -- ───────────────────────── people ─────────────────────────
-create table public.profiles (
-  id uuid primary key references auth.users (id) on delete cascade,
+create table profiles (
+  id uuid primary key references users (id) on delete cascade,
   first_name text not null default '',
   last_name text not null default '',
   phone text unique,
   tag text unique check (tag ~ '^[a-z0-9_.]{3,20}$'),
-  tier smallint not null default 0 references public.tiers (tier),
-  kyc_status public.kyc_status not null default 'none',
+  tier smallint not null default 0 references tiers (tier),
+  kyc_status kyc_status not null default 'none',
   bvn_hash text unique,               -- peppered hash: blocks one BVN opening many accounts
   bvn_last4 text,
   nin_last4 text,
@@ -46,9 +82,9 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 
--- PIN material lives in its own table with NO client policies at all.
-create table public.security_secrets (
-  user_id uuid primary key references public.profiles (id) on delete cascade,
+-- PIN material lives in its own table and is never returned to the app.
+create table security_secrets (
+  user_id uuid primary key references profiles (id) on delete cascade,
   pin_hash text,
   pin_salt text,
   pin_iterations int,
@@ -57,21 +93,22 @@ create table public.security_secrets (
   pin_set_at timestamptz
 );
 
-create table public.devices (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.profiles (id) on delete cascade,
-  device_id text not null,
-  name text not null default 'Unknown device',
-  trusted boolean not null default false,
-  last_seen timestamptz not null default now(),
-  created_at timestamptz not null default now(),
-  unique (user_id, device_id)
-);
+-- Creates the user, their profile and their security row in one go. Safe to call twice.
+create function ensure_user(p_phone text) returns uuid
+language plpgsql as $$
+declare v_id uuid;
+begin
+  insert into users (phone) values (p_phone) on conflict (phone) do nothing;
+  select id into v_id from users where phone = p_phone;
+  insert into profiles (id, phone) values (v_id, p_phone) on conflict (id) do nothing;
+  insert into security_secrets (user_id) values (v_id) on conflict (user_id) do nothing;
+  return v_id;
+end $$;
 
 -- ───────────────────────── money ─────────────────────────
-create table public.accounts (
+create table accounts (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid unique references public.profiles (id) on delete restrict,
+  user_id uuid unique references profiles (id) on delete restrict,
   kind text not null default 'customer' check (kind in ('customer', 'fees', 'suspense')),
   account_number text unique,
   account_name text,
@@ -84,18 +121,18 @@ create table public.accounts (
   check ((kind = 'customer') = (user_id is not null))
 );
 -- Internal accounts: transfer fees earned, and money in flight to other banks.
-insert into public.accounts (kind, account_name) values ('fees', 'Kolo fee income'), ('suspense', 'Outbound transfers in flight');
+insert into accounts (kind, account_name) values ('fees', 'Kolo fee income'), ('suspense', 'Outbound transfers in flight');
 
-create table public.transactions (
+create table transactions (
   id uuid primary key default gen_random_uuid(),
   reference text not null unique,
-  user_id uuid references public.profiles (id),
-  account_id uuid not null references public.accounts (id),
-  direction public.txn_direction not null,
-  category text not null,             -- bank_transfer | kolo_transfer | deposit | reversal | airtime | bill | savings | ...
+  user_id uuid references profiles (id),
+  account_id uuid not null references accounts (id),
+  direction txn_direction not null,
+  category text not null,             -- bank_transfer | kolo_transfer | deposit | airtime | bill | savings | ...
   amount_kobo bigint not null check (amount_kobo > 0),
   fee_kobo bigint not null default 0 check (fee_kobo >= 0),
-  status public.txn_status not null default 'pending',
+  status txn_status not null default 'pending',
   counterparty jsonb not null default '{}',
   narration text,
   provider_ref text unique,
@@ -105,29 +142,29 @@ create table public.transactions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create unique index transactions_idem on public.transactions (user_id, idempotency_key) where idempotency_key is not null;
-create index transactions_account_time on public.transactions (account_id, created_at desc);
-create index transactions_pending on public.transactions (status, created_at) where status = 'pending';
+create unique index transactions_idem on transactions (user_id, idempotency_key) where idempotency_key is not null;
+create index transactions_user_time on transactions (user_id, created_at desc);
+create index transactions_pending on transactions (status, created_at) where status = 'pending';
 
 -- Append-only record of every balance movement. Sum of entries per account = its balance.
-create table public.ledger_entries (
+create table ledger_entries (
   id bigserial primary key,
-  txn_id uuid not null references public.transactions (id),
-  account_id uuid not null references public.accounts (id),
+  txn_id uuid not null references transactions (id),
+  account_id uuid not null references accounts (id),
   amount_kobo bigint not null,        -- positive = credit, negative = debit
   balance_after_kobo bigint not null,
   created_at timestamptz not null default now()
 );
-create index ledger_account on public.ledger_entries (account_id, id);
+create index ledger_account on ledger_entries (account_id, id);
 
-create function public.block_ledger_changes() returns trigger language plpgsql as $$
+create function block_ledger_changes() returns trigger language plpgsql as $$
 begin raise exception 'ledger_entries is append-only'; end $$;
-create trigger ledger_no_update before update or delete on public.ledger_entries
-  for each row execute function public.block_ledger_changes();
+create trigger ledger_no_update before update or delete on ledger_entries
+  for each row execute function block_ledger_changes();
 
-create table public.beneficiaries (
+create table beneficiaries (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.profiles (id) on delete cascade,
+  user_id uuid not null references profiles (id) on delete cascade,
   account_name text not null,
   account_number text not null,
   bank_code text not null,
@@ -137,9 +174,9 @@ create table public.beneficiaries (
 );
 
 -- ───────────────────────── security plumbing ─────────────────────────
-create table public.otp_codes (
+create table otp_codes (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.profiles (id) on delete cascade,
+  user_id uuid not null references profiles (id) on delete cascade,
   purpose text not null,
   code_hash text not null,
   attempts int not null default 0,
@@ -147,17 +184,17 @@ create table public.otp_codes (
   consumed_at timestamptz,
   created_at timestamptz not null default now()
 );
-create index otp_user on public.otp_codes (user_id, created_at desc);
+create index otp_user on otp_codes (user_id, created_at desc);
 
-create table public.rate_events (
+create table rate_events (
   id bigserial primary key,
-  user_id uuid not null,
+  key text not null,                  -- user id, phone number or IP
   action text not null,
   created_at timestamptz not null default now()
 );
-create index rate_events_lookup on public.rate_events (user_id, action, created_at desc);
+create index rate_events_lookup on rate_events (key, action, created_at desc);
 
-create table public.audit_log (
+create table audit_log (
   id bigserial primary key,
   user_id uuid,
   actor text not null default 'user', -- user | system | admin:<uuid>
@@ -166,20 +203,20 @@ create table public.audit_log (
   ip text,
   created_at timestamptz not null default now()
 );
-create index audit_user on public.audit_log (user_id, created_at desc);
+create index audit_user on audit_log (user_id, created_at desc);
 
-create table public.notifications (
+create table notifications (
   id bigserial primary key,
-  user_id uuid not null references public.profiles (id) on delete cascade,
+  user_id uuid not null references profiles (id) on delete cascade,
   title text not null,
   body text not null default '',
   kind text not null default 'info',  -- credit | debit | security | info
   read boolean not null default false,
   created_at timestamptz not null default now()
 );
-create index notifications_user on public.notifications (user_id, created_at desc);
+create index notifications_user on notifications (user_id, created_at desc);
 
-create table public.webhook_events (
+create table webhook_events (
   id bigserial primary key,
   provider text not null,
   event_id text not null,
@@ -189,52 +226,10 @@ create table public.webhook_events (
   unique (provider, event_id)
 );
 
--- ───────────────────────── new user → profile ─────────────────────────
-create function public.handle_new_user() returns trigger
-language plpgsql security definer set search_path = public as $$
-begin
-  insert into public.profiles (id, phone) values (new.id, new.phone) on conflict do nothing;
-  insert into public.security_secrets (user_id) values (new.id) on conflict do nothing;
-  return new;
-end $$;
-create trigger on_auth_user_created after insert on auth.users
-  for each row execute function public.handle_new_user();
-
--- ───────────────────────── row level security ─────────────────────────
-alter table public.tiers enable row level security;
-alter table public.profiles enable row level security;
-alter table public.security_secrets enable row level security;
-alter table public.devices enable row level security;
-alter table public.accounts enable row level security;
-alter table public.transactions enable row level security;
-alter table public.ledger_entries enable row level security;
-alter table public.beneficiaries enable row level security;
-alter table public.otp_codes enable row level security;
-alter table public.rate_events enable row level security;
-alter table public.audit_log enable row level security;
-alter table public.notifications enable row level security;
-alter table public.webhook_events enable row level security;
-
--- The app may READ its own data. Every write that matters goes through edge functions.
-create policy "tiers readable" on public.tiers for select to authenticated using (true);
-create policy "own profile" on public.profiles for select to authenticated using (id = auth.uid());
-create policy "own devices" on public.devices for select to authenticated using (user_id = auth.uid());
-create policy "own account" on public.accounts for select to authenticated using (user_id = auth.uid());
-create policy "own transactions" on public.transactions for select to authenticated using (user_id = auth.uid());
-create policy "own beneficiaries read" on public.beneficiaries for select to authenticated using (user_id = auth.uid());
-create policy "own beneficiaries delete" on public.beneficiaries for delete to authenticated using (user_id = auth.uid());
-create policy "own notifications read" on public.notifications for select to authenticated using (user_id = auth.uid());
-create policy "own notifications mark read" on public.notifications for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
--- security_secrets, otp_codes, rate_events, audit_log, ledger_entries, webhook_events: no client policies (service role only).
-
--- Only the `read` flag on notifications is client-writable.
-revoke update on public.notifications from authenticated;
-grant update (read) on public.notifications to authenticated;
-
 -- ───────────────────────── money functions ─────────────────────────
 -- Internal helper: move money on one account and write the ledger line. Locks the row.
-create function public.post_entry(p_txn uuid, p_account uuid, p_amount bigint) returns bigint
-language plpgsql security definer set search_path = public as $$
+create function post_entry(p_txn uuid, p_account uuid, p_amount bigint) returns bigint
+language plpgsql as $$
 declare v_bal bigint;
 begin
   update accounts set balance_kobo = balance_kobo + p_amount where id = p_account returning balance_kobo into v_bal;
@@ -243,14 +238,12 @@ begin
   return v_bal;
 end $$;
 
-create function public.internal_account(p_kind text) returns uuid
-language sql stable security definer set search_path = public as $$
-  select id from accounts where kind = p_kind limit 1
-$$;
+create function internal_account(p_kind text) returns uuid
+language sql stable as $$ select id from accounts where kind = p_kind limit 1 $$;
 
 -- Total debits today (Lagos time) that count against limits.
-create function public.spent_today(p_user uuid) returns bigint
-language sql stable security definer set search_path = public as $$
+create function spent_today(p_user uuid) returns bigint
+language sql stable as $$
   select coalesce(sum(amount_kobo + fee_kobo), 0)::bigint
   from transactions
   where user_id = p_user and direction = 'debit'
@@ -259,30 +252,31 @@ language sql stable security definer set search_path = public as $$
     and created_at >= (date_trunc('day', now() at time zone 'Africa/Lagos') at time zone 'Africa/Lagos')
 $$;
 
--- Simple sliding-window rate limit. Returns true if allowed (and records the hit).
-create function public.rate_hit(p_user uuid, p_action text, p_max int, p_window interval) returns boolean
-language plpgsql security definer set search_path = public as $$
+-- Sliding-window rate limit. Returns true if allowed (and records the hit).
+create function rate_hit(p_key text, p_action text, p_max int, p_window_seconds int) returns boolean
+language plpgsql as $$
 declare n int;
 begin
-  select count(*) into n from rate_events where user_id = p_user and action = p_action and created_at > now() - p_window;
+  perform pg_advisory_xact_lock(hashtext(p_key || ':' || p_action));
+  select count(*) into n from rate_events where key = p_key and action = p_action and created_at > now() - make_interval(secs => p_window_seconds);
   if n >= p_max then return false; end if;
-  insert into rate_events (user_id, action) values (p_user, p_action);
+  insert into rate_events (key, action) values (p_key, p_action);
   return true;
 end $$;
 
 -- Step 1 of an outbound transfer: take the money (amount + fee) from the customer and park it.
 -- Idempotent: the same idempotency key returns the original transaction.
-create function public.begin_debit(
+create function begin_debit(
   p_user uuid, p_amount bigint, p_fee bigint, p_category text, p_reference text,
   p_counterparty jsonb, p_narration text, p_idem text
-) returns public.transactions
-language plpgsql security definer set search_path = public as $$
+) returns setof transactions
+language plpgsql as $$
 declare a accounts; t transactions; v_bal bigint;
 begin
   if p_amount <= 0 or p_fee < 0 then raise exception 'invalid_amount'; end if;
   if p_idem is not null then
     select * into t from transactions where user_id = p_user and idempotency_key = p_idem;
-    if found then return t; end if;
+    if found then return next t; return; end if;
   end if;
   select * into a from accounts where user_id = p_user and kind = 'customer' for update;
   if not found then raise exception 'no_account'; end if;
@@ -298,49 +292,49 @@ begin
   if p_fee > 0 then perform post_entry(t.id, internal_account('fees'), p_fee); end if;
 
   update transactions set balance_after_kobo = v_bal where id = t.id returning * into t;
-  return t;
+  return next t;
 end $$;
 
 -- Step 2a: the bank confirmed the transfer. Money leaves suspense for good.
-create function public.settle_debit(p_txn uuid, p_provider_ref text) returns public.transactions
-language plpgsql security definer set search_path = public as $$
+create function settle_debit(p_txn uuid, p_provider_ref text) returns setof transactions
+language plpgsql as $$
 declare t transactions;
 begin
   select * into t from transactions where id = p_txn for update;
   if not found then raise exception 'txn_not_found'; end if;
-  if t.status <> 'pending' then return t; end if;  -- already settled or reversed
+  if t.status <> 'pending' then return next t; return; end if;  -- already settled or reversed
   perform post_entry(t.id, internal_account('suspense'), -t.amount_kobo);
-  update transactions set status = 'successful', provider_ref = coalesce(p_provider_ref, provider_ref), updated_at = now()
+  update transactions set status = 'successful', provider_ref = coalesce(nullif(p_provider_ref, ''), provider_ref), updated_at = now()
   where id = t.id returning * into t;
-  return t;
+  return next t;
 end $$;
 
 -- Step 2b: the bank rejected it. Give everything back, fee included.
-create function public.reverse_debit(p_txn uuid, p_reason text) returns public.transactions
-language plpgsql security definer set search_path = public as $$
+create function reverse_debit(p_txn uuid, p_reason text) returns setof transactions
+language plpgsql as $$
 declare t transactions; v_bal bigint;
 begin
   select * into t from transactions where id = p_txn for update;
   if not found then raise exception 'txn_not_found'; end if;
-  if t.status <> 'pending' then return t; end if;
+  if t.status <> 'pending' then return next t; return; end if;
   perform post_entry(t.id, internal_account('suspense'), -t.amount_kobo);
   if t.fee_kobo > 0 then perform post_entry(t.id, internal_account('fees'), -t.fee_kobo); end if;
   v_bal := post_entry(t.id, t.account_id, t.amount_kobo + t.fee_kobo);
   update transactions set status = 'reversed', failure_reason = p_reason, balance_after_kobo = v_bal, updated_at = now()
   where id = t.id returning * into t;
-  return t;
+  return next t;
 end $$;
 
 -- Money arriving from another bank (called by the bank webhook). Idempotent on provider_ref.
-create function public.credit_deposit(
+create function credit_deposit(
   p_account_number text, p_amount bigint, p_provider_ref text, p_counterparty jsonb, p_narration text
-) returns public.transactions
-language plpgsql security definer set search_path = public as $$
+) returns setof transactions
+language plpgsql as $$
 declare a accounts; t transactions; v_bal bigint;
 begin
   if p_amount <= 0 then raise exception 'invalid_amount'; end if;
   select * into t from transactions where provider_ref = p_provider_ref;
-  if found then return t; end if;
+  if found then return next t; return; end if;
   select * into a from accounts where account_number = p_account_number and kind = 'customer' for update;
   if not found then raise exception 'account_not_found'; end if;
   insert into transactions (reference, user_id, account_id, direction, category, amount_kobo, status, counterparty, narration, provider_ref)
@@ -348,21 +342,21 @@ begin
   returning * into t;
   v_bal := post_entry(t.id, a.id, p_amount);
   update transactions set balance_after_kobo = v_bal where id = t.id returning * into t;
-  return t;
+  return next t;
 end $$;
 
 -- Kolo → Kolo transfer. Both sides move in one database transaction, so it can't half-happen.
-create function public.internal_transfer(
+create function internal_transfer(
   p_from uuid, p_to uuid, p_amount bigint, p_reference text, p_narration text, p_idem text
-) returns public.transactions
-language plpgsql security definer set search_path = public as $$
+) returns setof transactions
+language plpgsql as $$
 declare fa accounts; ta accounts; t transactions; c transactions; v_bal bigint; fp profiles; tp profiles;
 begin
   if p_amount <= 0 then raise exception 'invalid_amount'; end if;
   if p_from = p_to then raise exception 'same_account'; end if;
   if p_idem is not null then
     select * into t from transactions where user_id = p_from and idempotency_key = p_idem;
-    if found then return t; end if;
+    if found then return next t; return; end if;
   end if;
   -- lock both accounts in a fixed order to avoid deadlocks
   perform 1 from accounts where user_id in (p_from, p_to) and kind = 'customer' order by id for update;
@@ -388,27 +382,14 @@ begin
   returning * into c;
   v_bal := post_entry(c.id, ta.id, p_amount);
   update transactions set balance_after_kobo = v_bal where id = c.id;
-  return t;
-end $$;
-
--- Lock everything down: only the service role (edge functions, admin server) may call these.
-do $$
-declare f text;
-begin
-  foreach f in array array[
-    'post_entry(uuid,uuid,bigint)', 'internal_account(text)', 'spent_today(uuid)', 'rate_hit(uuid,text,integer,interval)',
-    'begin_debit(uuid,bigint,bigint,text,text,jsonb,text,text)', 'settle_debit(uuid,text)', 'reverse_debit(uuid,text)',
-    'credit_deposit(text,bigint,text,jsonb,text)', 'internal_transfer(uuid,uuid,bigint,text,text,text)'
-  ] loop
-    execute format('revoke all on function public.%s from public, anon, authenticated', f);
-    execute format('grant execute on function public.%s to service_role', f);
-  end loop;
+  return next t;
 end $$;
 
 -- Health check for admins: every account's balance must equal the sum of its ledger entries.
-create view public.ledger_mismatches as
+create view ledger_mismatches as
   select a.id, a.kind, a.account_number, a.balance_kobo, coalesce(sum(l.amount_kobo), 0) as ledger_sum
-  from public.accounts a left join public.ledger_entries l on l.account_id = a.id
+  from accounts a left join ledger_entries l on l.account_id = a.id
   group by a.id
   having a.balance_kobo <> coalesce(sum(l.amount_kobo), 0);
-revoke all on public.ledger_mismatches from public, anon, authenticated;
+
+insert into schema_migrations (version) values ('001_core');

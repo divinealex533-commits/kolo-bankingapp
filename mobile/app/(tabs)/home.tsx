@@ -6,7 +6,7 @@ import * as Clipboard from "expo-clipboard";
 import { Card, Divider, H2, Note } from "@/components/ui";
 import { TxnRow, Txn } from "@/components/TxnRow";
 import { fmtAcct, naira } from "@/lib/money";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useColors } from "@/lib/theme";
 
@@ -14,22 +14,18 @@ export default function Home() {
   const c = useColors();
   const { me, refresh } = useSession();
   const [txns, setTxns] = useState<Txn[]>([]);
-  const [unread, setUnread] = useState(0);
   const [hide, setHide] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
-    const [{ data }, { count }] = await Promise.all([
-      supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(6),
-      supabase.from("notifications").select("id", { count: "exact", head: true }).eq("read", false),
-      refresh(),
-    ]);
-    setTxns((data as Txn[]) ?? []); setUnread(count ?? 0);
+    const [r] = await Promise.all([api<{ transactions: Txn[] }>("transactions.list", { limit: 6 }).catch(() => ({ transactions: [] })), refresh()]);
+    setTxns(r.transactions);
   }, [refresh]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   if (!me) return null;
+  const unread = me.unread_count;
   const h = new Date().getHours();
   const greet = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
   const acct = me.account;

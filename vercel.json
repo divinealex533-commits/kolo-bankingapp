@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "public",
+  "regions": ["fra1"],
+  "crons": [{ "path": "/api/cron/reconcile", "schedule": "0 4 * * *" }]
+}

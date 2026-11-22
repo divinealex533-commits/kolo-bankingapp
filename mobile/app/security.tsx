@@ -5,11 +5,10 @@ import { Button, Card, Chip, Divider, H2, Note, Row, Screen } from "@/components
 import { useAuthorize } from "@/components/Authorize";
 import { api, ApiError } from "@/lib/api";
 import { naira, when } from "@/lib/money";
-import { supabase } from "@/lib/supabase";
 import { useSession } from "@/lib/session";
 import { useColors } from "@/lib/theme";
 
-type Device = { id: string; name: string; last_seen: string; device_id: string };
+type Device = { id: string; name: string; last_seen: string; current: boolean };
 
 export default function Security() {
   const c = useColors();
@@ -17,7 +16,7 @@ export default function Security() {
   const authorize = useAuthorize();
   const [devices, setDevices] = useState<Device[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const loadDevices = useCallback(() => { supabase.from("devices").select("*").order("last_seen", { ascending: false }).then(({ data }) => setDevices((data as Device[]) ?? [])); }, []);
+  const loadDevices = useCallback(() => { api<{ devices: Device[] }>("devices.list").then((r) => setDevices(r.devices)).catch(() => {}); }, []);
   useEffect(loadDevices, [loadDevices]);
   if (!me) return null;
   const p = me.profile, tierMax = me.tier.daily_kobo, current = Math.min(tierMax, p.daily_limit_kobo ?? tierMax);
@@ -67,8 +66,8 @@ export default function Security() {
         {devices.map((d, i) => (
           <View key={d.id}>
             {i ? <Divider /> : null}
-            <Row icon="📱" title={d.name} sub={`Last active ${when(d.last_seen)}`}
-              right={<Text accessibilityRole="button" style={{ color: c.neg, fontWeight: "700" }} onPress={() => run(async () => {
+            <Row icon="📱" title={d.name} sub={d.current ? "This phone" : `Last active ${when(d.last_seen)}`}
+              right={d.current ? <View /> : <Text accessibilityRole="button" style={{ color: c.neg, fontWeight: "700" }} onPress={() => run(async () => {
                 await authorize({ title: `Remove ${d.name}?`, subtitle: "It will be signed out", run: (s) => api("devices.revoke", { id: d.id, ...s }) });
                 loadDevices();
               }, "Device removed")}>Remove</Text>} />

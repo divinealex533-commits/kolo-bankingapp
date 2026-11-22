@@ -3,7 +3,7 @@ import { ActivityIndicator, Share, Text, View } from "react-native";
 import { Button, Card, Divider } from "@/components/ui";
 import { Txn, txnTitle } from "@/components/TxnRow";
 import { naira } from "@/lib/money";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { useColors } from "@/lib/theme";
 
 export function useTxn(id?: string) {
@@ -11,10 +11,15 @@ export function useTxn(id?: string) {
   useEffect(() => {
     if (!id) return;
     let live = true;
-    const load = () => supabase.from("transactions").select("*").eq("id", id).single().then(({ data }) => live && setT(data as Txn));
+    let poll: ReturnType<typeof setInterval> | undefined;
+    const load = () => api<{ transaction: Txn }>("transactions.get", { id }).then(({ transaction }) => {
+      if (!live) return;
+      setT(transaction);
+      if (transaction.status !== "pending" && poll) { clearInterval(poll); poll = undefined; }
+    }).catch(() => {});
     load();
-    const poll = setInterval(load, 4000); // pending transfers update by themselves
-    return () => { live = false; clearInterval(poll); };
+    poll = setInterval(load, 6000); // a pending transfer updates by itself
+    return () => { live = false; if (poll) clearInterval(poll); };
   }, [id]);
   return t;
 }

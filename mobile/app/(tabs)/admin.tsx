@@ -9,7 +9,7 @@ import { useColors } from "@/lib/theme";
 
 type Overview = { users: number; verified: number; pending_transfers: number; ledger_mismatches: number; customer_balances_kobo: number; fee_income_kobo: number; in_flight_kobo: number; volume_24h_in_kobo: number; volume_24h_out_kobo: number; sandbox: boolean };
 type U = { id: string; first_name: string; last_name: string; tag: string; phone: string; tier: number; kyc_status: string; frozen: boolean };
-type T = { id: string; reference: string; status: string; amount_kobo: number; direction: string; category: string; created_at: string; profiles?: { first_name: string; last_name: string; tag: string } };
+type T = { id: string; reference: string; status: string; amount_kobo: number; direction: string; category: string; created_at: string; first_name?: string; last_name?: string; tag?: string };
 
 // Only visible to accounts with profiles.is_admin = true. The server checks again on every call.
 export default function Admin() {
@@ -75,9 +75,9 @@ export default function Admin() {
         {txns.length ? txns.map((t, i) => (
           <View key={t.id}>
             {i ? <Divider /> : null}
-            <Row title={`${t.direction === "credit" ? "+" : "−"}${naira(t.amount_kobo)} · ${t.category}`} sub={`${t.profiles ? "@" + t.profiles.tag : ""} · ${t.status} · ${when(t.created_at)}\n${t.reference}`}
-              onPress={t.status === "pending" ? () => act(() => api("admin.requery", { txn_id: t.id }), "Requeried") : undefined}
-              right={t.status === "pending" ? <Text style={{ color: c.link, fontWeight: "700" }}>Requery</Text> : <View />} />
+            <Row title={`${t.direction === "credit" ? "+" : "−"}${naira(t.amount_kobo)} · ${t.category}`} sub={`${t.tag ? "@" + t.tag : ""} · ${t.status} · ${when(t.created_at)}\n${t.reference}`}
+              onPress={t.status === "pending" ? () => act(() => api("admin.requery", { txn_id: t.id }), "Re-checked with the bank") : undefined}
+              right={t.status === "pending" ? <Text style={{ color: c.link, fontWeight: "700" }}>Re-check</Text> : <View />} />
           </View>
         )) : <View style={{ padding: 16 }}><Note>None.</Note></View>}
       </Card>

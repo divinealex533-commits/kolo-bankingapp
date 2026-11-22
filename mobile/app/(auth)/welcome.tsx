@@ -2,12 +2,8 @@ import React, { useState } from "react";
 import { KeyboardAvoidingView, Platform, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Button, Field, Note, Screen } from "@/components/ui";
-import { supabase } from "@/lib/supabase";
+import { api, ApiError } from "@/lib/api";
 import { useColors } from "@/lib/theme";
-
-// Nigerian number → +234 format. 08031234567 → +2348031234567
-export const toIntl = (p: string) => { const d = p.replace(/\D/g, ""); return d.startsWith("234") ? "+" + d : d.startsWith("0") ? "+234" + d.slice(1) : "+234" + d; };
-const valid = (p: string) => /^(\+?234|0)[789][01]\d{8}$/.test(p.replace(/[\s-]/g, ""));
 
 export default function Welcome() {
   const c = useColors();
@@ -16,12 +12,12 @@ export default function Welcome() {
   const [busy, setBusy] = useState(false);
 
   async function next() {
-    if (!valid(phone)) { setErr("Enter a valid Nigerian phone number, like 0803 123 4567."); return; }
     setBusy(true); setErr(null);
-    const { error } = await supabase.auth.signInWithOtp({ phone: toIntl(phone) });
-    setBusy(false);
-    if (error) { setErr(error.message.includes("rate") ? "Too many tries. Wait a minute and try again." : "We couldn't send a code to that number. Check it and try again."); return; }
-    router.push({ pathname: "/verify", params: { phone: toIntl(phone) } });
+    try {
+      const r = await api<{ phone: string; dev_code?: string }>("auth.start", { phone });
+      router.push({ pathname: "/verify", params: { phone: r.phone, dev: r.dev_code ?? "" } });
+    } catch (e) { setErr((e as ApiError).message); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -33,7 +29,7 @@ export default function Welcome() {
           <Note>Sign in or create an account with your phone number. We'll text you a code.</Note>
         </View>
         <Field label="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="0803 123 4567" autoComplete="tel" error={err} maxLength={16} />
-        <Button title="Continue" onPress={next} loading={busy} />
+        <Button title="Continue" onPress={next} loading={busy} disabled={phone.replace(/\D/g, "").length < 10} />
         <Note>By continuing you agree to Kolo's terms and privacy policy.</Note>
       </KeyboardAvoidingView>
     </Screen>

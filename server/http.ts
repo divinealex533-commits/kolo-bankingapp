@@ -1,8 +1,8 @@
-// Shared HTTP helpers: CORS, JSON responses, and one error type the app can rely on.
+// HTTP helpers: CORS, JSON responses, and one error type the app can rely on.
 
-export const cors = {
+export const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-device-id, x-device-name, x-idempotency-key",
+  "Access-Control-Allow-Headers": "authorization, content-type, x-device-id, x-device-name",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
@@ -13,10 +13,13 @@ export class AppError extends Error {
 }
 
 export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
 }
 
-// Database errors raised by our SQL functions, mapped to messages people can act on.
+// Errors raised inside our SQL functions, turned into messages people can act on.
 const DB_ERRORS: Record<string, [number, string]> = {
   insufficient_funds: [400, "You don't have enough money for this. Your balance didn't change."],
   account_frozen: [403, "Your account is frozen. Unfreeze it in Security to send money."],
@@ -29,7 +32,7 @@ const DB_ERRORS: Record<string, [number, string]> = {
 
 export function handler(fn: (req: Request) => Promise<Response>) {
   return async (req: Request): Promise<Response> => {
-    if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+    if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     try {
       return await fn(req);
     } catch (e) {
@@ -44,8 +47,9 @@ export function handler(fn: (req: Request) => Promise<Response>) {
   };
 }
 
-export async function body<T = Record<string, unknown>>(req: Request): Promise<T> {
-  try { return await req.json() as T; } catch { throw new AppError("bad_request", "The request body must be JSON."); }
+export async function readJson<T = Record<string, unknown>>(req: Request): Promise<T> {
+  try { return (await req.json()) as T; } catch { throw new AppError("bad_request", "The request body must be JSON."); }
 }
 
-export const clientIp = (req: Request) => req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+export const clientIp = (req: Request) =>
+  req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";

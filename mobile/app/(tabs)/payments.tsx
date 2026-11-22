@@ -2,7 +2,7 @@ import React, { useCallback, useState } from "react";
 import { Alert, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { Card, Divider, H2, Row, Screen } from "@/components/ui";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import { useColors } from "@/lib/theme";
 
 type Ben = { id: string; account_name: string; account_number: string; bank_code: string; bank_name: string };
@@ -10,7 +10,7 @@ type Ben = { id: string; account_name: string; account_number: string; bank_code
 export default function Payments() {
   const c = useColors();
   const [bens, setBens] = useState<Ben[]>([]);
-  useFocusEffect(useCallback(() => { supabase.from("beneficiaries").select("*").order("created_at", { ascending: false }).then(({ data }) => setBens((data as Ben[]) ?? [])); }, []));
+  useFocusEffect(useCallback(() => { api<{ beneficiaries: Ben[] }>("beneficiaries.list").then((r) => setBens(r.beneficiaries)).catch(() => {}); }, []));
 
   return (
     <Screen title="Payments" back={false}>
@@ -30,7 +30,7 @@ export default function Payments() {
                 {i ? <Divider /> : null}
                 <Row title={b.account_name} sub={`${b.bank_name} · ${b.account_number}`}
                   onPress={() => router.push({ pathname: "/send-bank", params: { bank_code: b.bank_code, bank_name: b.bank_name, account_number: b.account_number } })}
-                  right={<Text accessibilityRole="button" onPress={() => Alert.alert("Remove beneficiary?", b.account_name, [{ text: "Cancel" }, { text: "Remove", style: "destructive", onPress: async () => { await supabase.from("beneficiaries").delete().eq("id", b.id); setBens((x) => x.filter((y) => y.id !== b.id)); } }])} style={{ color: c.muted, fontSize: 18, padding: 6 }}>✕</Text>} />
+                  right={<Text accessibilityRole="button" onPress={() => Alert.alert("Remove beneficiary?", b.account_name, [{ text: "Cancel" }, { text: "Remove", style: "destructive", onPress: async () => { await api("beneficiaries.delete", { id: b.id }); setBens((x) => x.filter((y) => y.id !== b.id)); } }])} style={{ color: c.muted, fontSize: 18, padding: 6 }}>✕</Text>} />
               </View>
             ))}
           </Card>
