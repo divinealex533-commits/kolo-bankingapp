@@ -19,7 +19,7 @@ export function PinPad({ length = 4, title, subtitle, message, onComplete, onCan
 
   async function press(k: string) {
     if (busy) return;
-    Haptics.selectionAsync().catch(() => {});
+    try { Haptics.selectionAsync().catch(() => {}); } catch { /* no haptics here */ }
     if (k === "del") { setVal((v) => v.slice(0, -1)); return; }
     const next = (val + k).slice(0, length);
     setVal(next);
@@ -27,7 +27,7 @@ export function PinPad({ length = 4, title, subtitle, message, onComplete, onCan
       setBusy(true);
       try {
         const err = await onComplete(next);
-        if (err) { setMsg(err); setVal(""); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {}); }
+        if (err) { setMsg(err); setVal(""); try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {}); } catch { /* no haptics here */ } }
       } finally { setBusy(false); }
     }
   }

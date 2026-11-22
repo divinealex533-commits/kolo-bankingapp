@@ -25,10 +25,13 @@ export function AppLock({ children }: { children: React.ReactNode }) {
   const lastTouch = useRef(Date.now());
 
   const bio = useCallback(async () => {
-    const ok = (await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync());
-    if (!ok) return;
-    const r = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock Kolo", disableDeviceFallback: true, cancelLabel: "Use PIN" });
-    if (r.success) { setLocked(false); lastTouch.current = Date.now(); }
+    if (Platform.OS === "web") return; // browsers use the PIN
+    try {
+      const ok = (await LocalAuthentication.hasHardwareAsync()) && (await LocalAuthentication.isEnrolledAsync());
+      if (!ok) return;
+      const r = await LocalAuthentication.authenticateAsync({ promptMessage: "Unlock Kolo", disableDeviceFallback: true, cancelLabel: "Use PIN" });
+      if (r.success) { setLocked(false); lastTouch.current = Date.now(); }
+    } catch { /* fall back to the PIN */ }
   }, []);
 
   useEffect(() => {
@@ -52,7 +55,7 @@ export function AppLock({ children }: { children: React.ReactNode }) {
         <View style={[StyleSheet.absoluteFill, st.lock]}>
           <SafeAreaView style={{ flex: 1, justifyContent: "center", paddingHorizontal: 20 }}>
             <Text style={st.brand}>Kolo</Text>
-            <PinPad dark title={`Welcome back${me?.profile.first_name ? ", " + me.profile.first_name : ""}`} subtitle="Enter your PIN to unlock" onBiometric={bio}
+            <PinPad dark title={`Welcome back${me?.profile.first_name ? ", " + me.profile.first_name : ""}`} subtitle="Enter your PIN to unlock" onBiometric={Platform.OS === "web" ? undefined : bio}
               onComplete={async (pin) => {
                 try { await api("pin.check", { pin }); setLocked(false); lastTouch.current = Date.now(); return null; }
                 catch (e) { const err = e as ApiError; if (err.code === "unauthorized") { await signOut(); return null; } return err.message; }

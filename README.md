@@ -45,14 +45,24 @@ Run `db/001_core.sql` once on a fresh Neon database (Neon → SQL Editor). Check
 Vercel's free plan runs scheduled jobs once a day, so the checker in `vercel.json` runs daily, and a pending transfer is also re-checked whenever its owner opens it. For every-minute checks for free, create a job at **cron-job.org** that calls `https://YOUR-APP.vercel.app/api/cron/reconcile` every minute with the header `Authorization: Bearer YOUR_CRON_SECRET`. Or upgrade to Vercel Pro and change the schedule to `* * * * *`.
 
 ## The app (mobile/)
-```bash
-cd mobile
-cp .env.example .env        # EXPO_PUBLIC_API_URL = your Vercel address
-npm install
-npx expo install --fix      # aligns every package to the Expo SDK
-npx expo start              # scan the QR code with Expo Go
-```
-Without a computer, Expo's cloud build (EAS) can build an installable Android app straight from this repo.
+
+**Web version (no install):** https://kolo-web.vercel.app is built automatically from `mobile/` on every push (Vercel project `kolo-web`).
+
+**Real phone app, from a laptop (Windows or Mac):**
+1. Install **Node.js LTS** from nodejs.org and **Git** from git-scm.com.
+2. On your phone, install **Expo Go** from the App Store / Play Store.
+3. On the laptop, open a terminal and run:
+   ```bash
+   git clone https://github.com/divinealex533-commits/kolo-bankingapp
+   cd kolo-bankingapp/mobile
+   cp .env.example .env        # on Windows: copy .env.example .env
+   npm install --legacy-peer-deps
+   npx expo install --fix      # lines every package up with the Expo SDK
+   npx expo start
+   ```
+4. Scan the QR code with your phone camera (iPhone) or the Expo Go app (Android). Phone and laptop must be on the same Wi-Fi; if not, use `npx expo start --tunnel`.
+
+Face ID and screenshot blocking need a development build (`npx expo run:ios` / `run:android`, or an EAS cloud build), not Expo Go.
 
 ## Testing with the test bank
 - In test mode, sign-in and security codes are shown on screen (no SMS needed).
