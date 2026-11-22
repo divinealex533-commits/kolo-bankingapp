@@ -67,7 +67,14 @@ export default function SendBank() {
 
   return (
     <Screen title="Send to bank">
-      <Field label="Bank" value={bank?.name ?? ""} placeholder="Choose a bank" editable={false} onPressIn={() => setPicker(true)} />
+      <View style={{ gap: 6 }}>
+        <Text style={{ fontSize: 13, fontWeight: "700", color: c.muted }}>Bank</Text>
+        <Pressable accessibilityRole="button" onPress={() => setPicker(true)}
+          style={{ borderWidth: 1, borderColor: c.line, backgroundColor: c.surface, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 14, flexDirection: "row", alignItems: "center" }}>
+          <Text style={{ flex: 1, fontSize: 16, color: bank ? c.ink : c.muted }}>{bank?.name || "Choose a bank"}</Text>
+          <Text style={{ color: c.muted, fontSize: 16 }}>▾</Text>
+        </Pressable>
+      </View>
       <Field label="Account number" value={acct} onChangeText={(v) => setAcct(v.replace(/\D/g, "").slice(0, 10))} keyboardType="number-pad" maxLength={10} placeholder="10 digits" error={lookupErr} />
       {name ? <Card style={{ padding: 12 }}><Text style={{ color: c.pos, fontWeight: "800" }}>✓ {name}</Text></Card> : null}
       <Field label="Amount" big value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="₦0" error={problem} />
